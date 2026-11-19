@@ -40,6 +40,8 @@
     let layout = null;
     /* 启动、图片读取和导出期间阻止工程被切换。 */
     let busy = true;
+    /* 等待页面空闲后从系统启动请求中读取的工程文件句柄。 */
+    const pendingLaunchFiles = [];
     /* 记录最新的自动保存请求，避免旧请求更新页面状态。 */
     let storageRevision = 0;
     /* 自动保存正在写入时合并后续输入，只提交最新工程快照。 */
@@ -188,6 +190,13 @@
         for (const control of element('resource-list').querySelectorAll('button, input')) {
             control.disabled = busy || control.dataset.atBoundary === 'true';
         }
+    }
+
+    /* 结束当前操作并继续处理等待打开的系统工程。 */
+    function finishOperation() {
+        busy = false;
+        syncControls();
+        openNextLaunchedProject();
     }
 
     /* 显示批量勾选状态，部分选中时将表头复选框设为半选。 */
@@ -412,8 +421,7 @@
             commitItems();
             status(failed.length ? `无法读取 ${failed.length} 个文件：${failed.join('、')}` : '', failed.length > 0);
         } finally {
-            busy = false;
-            syncControls();
+            finishOperation();
         }
     }
 
@@ -790,15 +798,17 @@
         renderItems();
     }
 
-    /* 读取 file 中的便携工程，通过所有检查后替换当前工程。 */
-    async function openProject(file) {
-        if (busy || !file) {
+    /* 读取 source 提供的工程文件或系统文件句柄，校验通过后替换当前工程。 */
+    async function openProject(source) {
+        if (busy || !source) {
             return;
         }
         busy = true;
         syncControls();
         status('正在打开工程…');
         try {
+            /* 系统启动传入的句柄需要先读取为与文件选择框相同的 File。 */
+            const file = source instanceof File ? source : await source.getFile();
             /* 待验证的工程与内嵌原图。 */
             const candidate = await storage.importFile(file);
             await checkProjectImages(candidate);
@@ -808,8 +818,37 @@
         } catch (error) {
             status(error.message, true);
         } finally {
-            busy = false;
-            syncControls();
+            finishOperation();
+        }
+    }
+
+    /* 页面空闲时取出下一份系统工程，按接收顺序依次载入。 */
+    function openNextLaunchedProject() {
+        if (!busy && pendingLaunchFiles.length) {
+            void openProject(pendingLaunchFiles.shift());
+        }
+    }
+
+    /* 接收 launch 中由系统交给已安装应用的工程文件句柄。 */
+    function receiveProjectLaunch(launch) {
+        pendingLaunchFiles.push(...launch.files);
+        openNextLaunchedProject();
+    }
+
+    /* 在支持的安全网页环境中接收系统文件并注册离线缓存。 */
+    async function initializePwa() {
+        if (!window.isSecureContext || !['http:', 'https:'].includes(window.location.protocol)) {
+            return;
+        }
+        if (typeof window.launchQueue?.setConsumer === 'function') {
+            window.launchQueue.setConsumer(receiveProjectLaunch);
+        }
+        if ('serviceWorker' in navigator) {
+            try {
+                await navigator.serviceWorker.register('./service-worker.js');
+            } catch (error) {
+                console.warn('离线缓存注册失败。', error);
+            }
         }
     }
 
@@ -853,8 +892,7 @@
                 status(error.message, true);
             }
         } finally {
-            busy = false;
-            syncControls();
+            finishOperation();
         }
     }
 
@@ -972,8 +1010,7 @@
                 status(error.message, true);
             }
         } finally {
-            busy = false;
-            syncControls();
+            finishOperation();
         }
     }
 
@@ -1072,8 +1109,10 @@
             showOutputDirectory();
             busy = false;
             renderItems();
+            openNextLaunchedProject();
         }
     }
 
+    void initializePwa();
     void initialize();
 })();
