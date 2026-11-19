@@ -1,0 +1,18 @@
+# 旧版 Python 桌面工具使用各自的仓库
+/header_to_bin/
+/image_to_header/
+
+# 本地工作规则与编辑器配置
+/AGENTS.md
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
+
+# 浏览器生成的工程与导出文件
+*.itbproj
+*.htbproj
+*.bin
+*.zip
+system_ui_images_map.h
+system_ui_images_map.csv

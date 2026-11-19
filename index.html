@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Image To Bin</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="image-converter.js" defer></script>
+    <script src="project-storage.js" defer></script>
+    <script src="zip-export.js" defer></script>
+    <script src="app.js" defer></script>
+</head>
+<body>
+    <div class="shell">
+        <header class="app-header">
+            <div class="brand">
+                <span class="chip" aria-hidden="true"><i></i></span>
+                <div>
+                    <h1>Image To Bin</h1>
+                </div>
+            </div>
+            <div class="header-actions">
+                <label class="appearance">主题
+                    <select id="theme" data-setting disabled>
+                        <option value="system">跟随系统</option>
+                        <option value="light">浅色</option>
+                        <option value="dark">深色</option>
+                    </select>
+                </label>
+                <button id="open-project" type="button" disabled>打开工程</button>
+                <input id="project-file" type="file" accept=".itbproj" hidden>
+            </div>
+        </header>
+
+        <main class="layout">
+            <section class="glass project-bar" aria-label="工程保存">
+                <div class="save-location">
+                    <span>保存目录</span>
+                    <strong id="save-path" aria-live="polite">尚未选择</strong>
+                </div>
+                <div class="actions">
+                    <button id="choose-save-path" type="button" disabled>选择保存路径</button>
+                    <button id="save-project" class="primary" type="button" disabled>保存工程</button>
+                </div>
+            </section>
+            <p id="operation-status" class="message" role="status" hidden></p>
+
+            <section class="glass settings" aria-labelledby="settings-title">
+                <div class="section-head">
+                    <h2 id="settings-title">转换设置</h2>
+                </div>
+                <fieldset id="settings" class="settings-grid" disabled>
+                    <div class="group">
+                        <h3>图片取模</h3>
+                        <label>颜色格式<select id="format" data-setting></select></label>
+                        <label>扫描方向<select id="scan" data-setting></select></label>
+                        <div id="mono-options" class="option-grid" hidden>
+                            <label>黑白阈值<input id="monoThreshold" data-setting type="number" min="0" max="255"></label>
+                            <label>位序<select id="monoBitOrder" data-setting><option value="msb">MSB 优先</option><option value="lsb">LSB 优先</option></select></label>
+                            <label class="wide">置 1 条件<select id="monoOneValue" data-setting><option value="light">亮色为 1</option><option value="dark">暗色为 1</option></select></label>
+                        </div>
+                        <div class="option-grid">
+                            <label>字节序<select id="endian" data-setting><option value="little">小端</option><option value="big">大端</option></select></label>
+                            <label class="check"><input id="includeHeader" type="checkbox" data-setting>保留 8 B 图片头</label>
+                        </div>
+                    </div>
+
+                    <div class="group">
+                        <h3>Flash 布局</h3>
+                        <label>芯片预设<select id="preset" data-setting></select></label>
+                        <div class="option-grid">
+                            <label>Flash 容量<input id="capacity" data-setting placeholder="例如 512 KB"></label>
+                            <label>起始地址<input id="startAddress" data-setting spellcheck="false"></label>
+                            <label>地址对齐<input id="alignment" data-setting spellcheck="false"></label>
+                            <label>空洞填充<input id="fillByte" data-setting spellcheck="false"></label>
+                        </div>
+                    </div>
+
+                    <div class="group">
+                        <h3>文件命名</h3>
+                        <label>BIN 文件名<input id="binName" data-setting spellcheck="false"></label>
+                        <label>C 标识符前缀<input id="mapPrefix" data-setting spellcheck="false"></label>
+                    </div>
+                </fieldset>
+                <p class="storage-status" id="storage-status" role="status">正在恢复本地工程…</p>
+            </section>
+
+            <section class="glass workspace" aria-labelledby="workspace-title">
+                <div class="section-head">
+                    <div>
+                        <h2 id="workspace-title">图片资源</h2>
+                        <p id="resource-count" aria-live="polite">0 张图片</p>
+                    </div>
+                    <div class="actions">
+                        <button id="reserve" type="button" disabled>添加预留区</button>
+                        <button id="import-directory" type="button" disabled>导入目录</button>
+                        <button id="import-images" class="accent" type="button" disabled><span aria-hidden="true">＋</span> 导入图片</button>
+                        <input id="image-files" type="file" accept="image/*,.bmp,.png,.jpg,.jpeg,.gif,.webp,.ico,.avif,.svg,.tif,.tiff,.heif,.heic,.jxl,.apng,.jfif,.jpe" multiple hidden>
+                        <input id="directory-files" type="file" webkitdirectory multiple hidden>
+                    </div>
+                </div>
+
+                <dl class="metrics" aria-label="Flash 使用统计">
+                    <div><dt>参与打包</dt><dd id="enabled-count">0 / 0</dd></div>
+                    <div><dt>像素数据</dt><dd id="payload-size">0 B</dd></div>
+                    <div><dt>BIN 长度</dt><dd id="bin-size">0 B</dd></div>
+                    <div><dt>未分配容量</dt><dd id="remaining-size">—</dd></div>
+                </dl>
+                <div class="capacity" id="capacity-meter" role="meter" aria-label="BIN 占 Flash 容量" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0%">
+                    <div id="capacity-fill"></div>
+                </div>
+
+                <div id="drop-target" class="resource-area">
+                    <div id="empty-state" class="empty">
+                        <span class="picture-mark" aria-hidden="true"><i></i></span>
+                        <div>
+                            <h3>拖入图片，或从上方导入</h3>
+                            <p>支持批量导入 PNG、JPEG、BMP、WebP 等图片。</p>
+                        </div>
+                    </div>
+                    <div id="bulk-tools" class="bulk-tools" hidden>
+                        <span id="selection-count">已选 0 项</span>
+                        <button id="move-selected-up" type="button" disabled>上移选中</button>
+                        <button id="move-selected-down" type="button" disabled>下移选中</button>
+                        <button id="delete-selected" type="button" disabled>删除选中</button>
+                        <button id="clear-resources" type="button" disabled>清空资源</button>
+                    </div>
+                    <div id="table-wrap" class="table-wrap" hidden>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col" class="select-column"><input id="select-all" type="checkbox" aria-label="全选资源" title="全选资源" disabled></th>
+                                    <th scope="col" class="enable-column">启用</th>
+                                    <th scope="col">资源名 / 原图</th>
+                                    <th scope="col" class="address-column">起始地址</th>
+                                    <th scope="col" class="size-column">记录长度</th>
+                                    <th scope="col" class="actions-column">排序 / 删除</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resource-list"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="issues" class="issues" hidden aria-live="polite">
+                    <strong>保存前请检查</strong>
+                    <ul id="issue-list"></ul>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <dialog id="preview" class="glass preview" aria-labelledby="preview-title">
+        <div class="section-head">
+            <div><h2 id="preview-title">原图预览</h2><p id="preview-info" aria-live="polite"></p></div>
+            <form method="dialog"><button type="submit" autofocus>关闭</button></form>
+        </div>
+        <div class="preview-toolbar">
+            <div class="preview-actions" role="group" aria-label="浏览图片">
+                <button id="preview-previous" type="button" title="上一张（←）">上一张</button>
+                <span id="preview-position" class="preview-value"></span>
+                <button id="preview-next" type="button" title="下一张（→）">下一张</button>
+            </div>
+            <div class="preview-actions" role="group" aria-label="图片缩放">
+                <button id="preview-fit" type="button" title="适应窗口（0）" aria-pressed="true">适应</button>
+                <button id="preview-original" type="button" title="实际大小（1）" aria-pressed="false">1:1</button>
+                <button id="preview-zoom-out" type="button" aria-label="缩小" title="缩小（−）">−</button>
+                <output id="preview-zoom" class="preview-value" aria-label="当前缩放比例"></output>
+                <button id="preview-zoom-in" type="button" aria-label="放大" title="放大（+）">+</button>
+            </div>
+        </div>
+        <div id="preview-stage" class="preview-stage" tabindex="0" role="region" aria-label="原图滚动区域">
+            <div class="preview-canvas">
+                <img id="preview-image" alt="" draggable="false">
+                <p id="preview-error" role="alert" hidden>无法显示这张原图。</p>
+            </div>
+        </div>
+    </dialog>
+
+    <template id="resource-row">
+        <tr>
+            <td class="select-column"><input type="checkbox" data-select></td>
+            <td class="enable-column"><input type="checkbox" data-field="enabled"></td>
+            <td>
+                <div class="resource-title">
+                    <button class="thumb" type="button" data-action="preview"><img alt=""></button>
+                    <div class="resource-meta">
+                        <input data-field="name" spellcheck="false">
+                        <span class="source"></span>
+                    </div>
+                </div>
+                <div class="reserve-fields" hidden>
+                    <label>长度（B）<input data-field="length" spellcheck="false"></label>
+                    <label>填充值<input data-field="fill" spellcheck="false"></label>
+                </div>
+            </td>
+            <td class="address-column">
+                <input data-field="address" placeholder="自动" spellcheck="false">
+                <span class="resolved"></span>
+            </td>
+            <td class="size-column"><span class="size"></span></td>
+            <td class="actions-column">
+                <div class="row-actions">
+                    <button type="button" data-action="up" aria-label="上移资源" title="上移资源">↑</button>
+                    <button type="button" data-action="down" aria-label="下移资源" title="下移资源">↓</button>
+                    <button type="button" data-action="remove" aria-label="移除资源" title="移除资源">×</button>
+                </div>
+            </td>
+        </tr>
+    </template>
+</body>
+</html>
